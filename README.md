@@ -82,10 +82,3 @@
 Исходник: [`docs/archimate.puml`](docs/archimate.puml)
 
 ![ArchiMate](docs/img/archimate.svg)
-
-## Как пересобрать картинки
-
-```bash
-java -jar plantuml.jar -charset UTF-8 -tsvg -o img docs/*.puml
-java -jar plantuml.jar -charset UTF-8 -tpng -o img docs/*.puml
-```
