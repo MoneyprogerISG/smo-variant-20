@@ -1,0 +1,197 @@
+@startuml class
+title Диаграмма классов — СМО «Склад погрузки грузовиков», вариант 20
+
+skinparam classAttributeIconSize 0
+skinparam linetype ortho
+hide empty members
+
+enum EventType {
+  GENERATION
+  RELEASE
+}
+
+class Event {
+  - time: double
+  - type: EventType
+  - source: Source
+  - device: Device
+  + getTime(): double
+  + getType(): EventType
+  + getSource(): Source
+  + getDevice(): Device
+}
+
+class EventCalendar {
+  - events: PriorityQueue<Event>
+  + schedule(event: Event): void
+  + next(): Event
+  + isEmpty(): boolean
+  + snapshot(): List<Event>
+}
+
+class Request <<Заявка на погрузку>> {
+  - sourceId: int
+  - number: int
+  - genTime: double
+  - bufferInTime: double
+  - serviceStartTime: double
+  - serviceEndTime: double
+  + getSourceId(): int
+  + getNumber(): int
+  + getGenTime(): double
+  + setBufferInTime(t: double): void
+  + setServiceStartTime(t: double): void
+  + setServiceEndTime(t: double): void
+}
+
+class Source <<Грузовик (ИБ, ИЗ2)>> {
+  - id: int
+  - a: double
+  - b: double
+  - requestCounter: int
+  - random: Random
+  + generate(now: double): Request
+  + nextArrivalTime(now: double): double
+  + getId(): int
+}
+note bottom of Source
+  ИЗ2: τ = a + (b − a)·R
+end note
+
+class Buffer <<Зона ожидания (Д1ОЗ2)>> {
+  - capacity: int
+  - requests: LinkedList<Request>
+  + add(request: Request, now: double): int
+  + removeLast(): Request
+  + takeFirst(): Request
+  + isFull(): boolean
+  + isEmpty(): boolean
+  + size(): int
+  + snapshot(): List<Request>
+}
+note bottom of Buffer
+  add → в конец очереди (Д1ОЗ2)
+  removeLast → выбивание хвоста (Д1ОО4)
+  takeFirst → FIFO, сдвиг очереди (Д2Б1)
+end note
+
+class Device <<Погрузчик (ПЗ1)>> {
+  - id: int
+  - lambda: double
+  - random: Random
+  - current: Request
+  - releaseTime: double
+  - busyTime: double
+  + startService(request: Request, now: double): double
+  + finishService(now: double): Request
+  + isFree(): boolean
+  + getId(): int
+  + getReleaseTime(): double
+  + getCurrent(): Request
+}
+note bottom of Device
+  ПЗ1: tОбсл = −(1/λ)·ln(R)
+end note
+
+class DevicePool <<Кольцо погрузчиков (Д2П2)>> {
+  - devices: List<Device>
+  - pointer: int
+  + findFreeDevice(): Device
+  + hasFreeDevice(): boolean
+  + getPointer(): int
+  + getDevices(): List<Device>
+}
+note bottom of DevicePool
+  Поиск с devices[pointer] по кольцу;
+  после выбора pointer := (j + 1) mod m.
+  Указатель один — общий для обоих диспетчеров.
+end note
+
+class PlacementDispatcher <<Диспетчер постановки>> {
+  - buffer: Buffer
+  - devicePool: DevicePool
+  - calendar: EventCalendar
+  - statistics: Statistics
+  + place(request: Request, now: double): void
+  - sendToDevice(device: Device, request: Request, now: double): void
+  - putToBuffer(request: Request, now: double): void
+  - knockOutAndPut(request: Request, now: double): void
+}
+
+class SelectionDispatcher <<Диспетчер выбора>> {
+  - buffer: Buffer
+  - devicePool: DevicePool
+  - calendar: EventCalendar
+  - statistics: Statistics
+  + onDeviceFreed(now: double): void
+  - selectRequest(): Request
+  - selectDevice(): Device
+}
+
+class Statistics <<ОР1>> {
+  - generated: int[]
+  - refused: int[]
+  - served: int[]
+  - totalWaitTime: double[]
+  - totalServiceTime: double[]
+  - deviceBusyTime: double[]
+  + recordGenerated(request: Request): void
+  + recordRefused(request: Request, now: double): void
+  + recordWait(request: Request, waitTime: double): void
+  + recordServed(request: Request, now: double): void
+  + recordBusyTime(device: Device, time: double): void
+  + getRefusalProbability(sourceId: int): double
+  + getDeviceUtilization(deviceId: int, totalTime: double): double
+  + buildSummaryTable(totalTime: double): SummaryTable
+}
+
+class Simulator <<Управляющая программа>> {
+  - currentTime: double
+  - calendar: EventCalendar
+  - sources: List<Source>
+  - buffer: Buffer
+  - devicePool: DevicePool
+  - placementDispatcher: PlacementDispatcher
+  - selectionDispatcher: SelectionDispatcher
+  - statistics: Statistics
+  + init(): void
+  + step(): Event
+  + runAuto(requestsCount: int): SummaryTable
+  + getState(): SystemState
+  - handleGeneration(event: Event): void
+  - handleRelease(event: Event): void
+}
+note right of Simulator
+  step() — пошаговый режим (ОД2),
+  runAuto() — автоматический режим (ОР1)
+end note
+
+Simulator *-- "1" EventCalendar
+Simulator *-- "n" Source
+Simulator *-- "1" Buffer
+Simulator *-- "1" DevicePool
+Simulator *-- "1" PlacementDispatcher
+Simulator *-- "1" SelectionDispatcher
+Simulator *-- "1" Statistics
+
+DevicePool o-- "m" Device
+
+PlacementDispatcher --> Buffer
+PlacementDispatcher --> DevicePool
+PlacementDispatcher --> EventCalendar
+PlacementDispatcher --> Statistics
+
+SelectionDispatcher --> Buffer
+SelectionDispatcher --> DevicePool
+SelectionDispatcher --> EventCalendar
+SelectionDispatcher --> Statistics
+
+EventCalendar o-- "*" Event
+Event --> EventType
+Event --> Source
+Event --> Device
+
+Source ..> Request : создаёт
+Buffer o-- "0..k" Request
+Device o-- "0..1" Request
+@enduml

@@ -1,0 +1,74 @@
+@startuml archimate
+!include <archimate/Archimate>
+title ArchiMate 3.0 — бизнес-процесс «Погрузка грузовиков на складе», вариант 20
+left to right direction
+skinparam nodesep 30
+skinparam ranksep 40
+
+' ---------- Активные структуры ----------
+Business_Actor(driver, "Водитель грузовика\n(источник, ИБ)")
+Business_Role(rolePD, "Диспетчер приёма\n(диспетчер постановки)")
+Business_Role(roleSD, "Диспетчер погрузки\n(диспетчер выбора)")
+Business_Role(roleDev, "Оператор погрузчика\n(прибор)")
+Business_Actor(manager, "Руководитель склада")
+
+' ---------- Поведение ----------
+Business_Event(evArrive, "Грузовик прибыл\n(интервал ~ U[a; b], ИЗ2)")
+Business_Process(pReg, "Регистрация задания\nна погрузку")
+Business_Process(pFind, "Поиск свободного погрузчика\nпо кольцу от указателя (Д2П2)")
+() " " as jFree
+() " " as jBuf
+Business_Process(pQueue, "Постановка в очередь\nу доков — в конец (Д1ОЗ2)")
+Business_Process(pReject, "Разворот грузовика, вставшего\nв очередь последним (Д1ОО4)")
+Business_Event(evRejected, "Грузовик развёрнут\n(отказ)")
+Business_Event(evFree, "Погрузчик\nосвободился")
+Business_Process(pSelect, "Выбор грузовика, дольше\nвсех ждущего (FIFO, Д2Б1)")
+Business_Process(pAssign, "Назначение погрузчика\nпо кольцу (Д2П2)")
+Business_Process(pLoad, "Погрузка грузовика\n(время ~ Exp(λ), ПЗ1)")
+Business_Event(evDone, "Грузовик погружен\nи уехал")
+Business_Process(pReport, "Анализ работы склада\n(сводная таблица, ОР1)")
+
+Business_Service(svcLoad, "Услуга «Погрузка\nгрузовиков»")
+
+' ---------- Пассивные структуры ----------
+Business_Object(boTask, "Задание на погрузку\n(заявка)")
+Business_Object(boQueue, "Очередь у доков\n(буфер, k мест)")
+Business_Object(boLog, "Журнал работы склада\n(статистика)")
+
+' ---------- Поток процесса ----------
+Rel_Triggering(evArrive, pReg, "")
+Rel_Triggering(pReg, pFind, "")
+Rel_Triggering(pFind, jFree, "")
+Rel_Triggering(jFree, pLoad, "свободен\n(HappyFlow)")
+Rel_Triggering(jFree, jBuf, "все заняты")
+Rel_Triggering(jBuf, pQueue, "есть место")
+Rel_Triggering(jBuf, pReject, "очередь полна")
+Rel_Triggering(pReject, evRejected, "")
+Rel_Triggering(pReject, pQueue, "новый грузовик\nвстаёт в конец")
+Rel_Triggering(pLoad, evDone, "")
+Rel_Triggering(pLoad, evFree, "")
+Rel_Triggering(evFree, pSelect, "очередь не пуста")
+Rel_Triggering(pSelect, pAssign, "")
+Rel_Triggering(pAssign, pLoad, "")
+
+' ---------- Назначения ----------
+Rel_Assignment(driver, evArrive, "")
+Rel_Assignment(rolePD, pReg, "")
+Rel_Assignment(rolePD, pFind, "")
+Rel_Assignment(rolePD, pReject, "")
+Rel_Assignment(roleSD, pSelect, "")
+Rel_Assignment(roleSD, pAssign, "")
+Rel_Assignment(roleDev, pLoad, "")
+Rel_Assignment(manager, pReport, "")
+Rel_Realization(pLoad, svcLoad, "")
+Rel_Serving(svcLoad, driver, "")
+
+' ---------- Доступ к объектам ----------
+Rel_Access_w(pReg, boTask, "")
+Rel_Access_w(pQueue, boQueue, "")
+Rel_Access_rw(pReject, boQueue, "")
+Rel_Access_rw(pSelect, boQueue, "")
+Rel_Access_w(evRejected, boLog, "")
+Rel_Access_w(evDone, boLog, "")
+Rel_Access_r(pReport, boLog, "")
+@enduml

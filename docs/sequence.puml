@@ -1,0 +1,185 @@
+@startuml sequence
+title СМО «Склад погрузки грузовиков», вариант 20\nИБ ИЗ2 ПЗ1 Д1ОЗ2 Д1ОО4 Д2П2 Д2Б1 ОР1 ОД2
+
+skinparam sequenceMessageAlign left
+skinparam responseMessageBelowArrow true
+skinparam noteBackgroundColor #FFFBE6
+skinparam noteBorderColor #C9A227
+autonumber
+
+control     "Календарь событий\n(Simulator)"           as Sim
+entity      "Источник Иi\n(грузовик)"                   as Src
+control     "Диспетчер постановки\n(диспетчерская приёма)" as PD
+participant "Пул погрузчиков\n(указатель приборов)"     as Pool
+participant "Погрузчик Пj"                              as Dev
+queue       "Буфер\n(зона ожидания, k мест)"             as Buf
+control     "Диспетчер выбора\n(распределение погрузки)" as SD
+database    "Статистика"                                as Stat
+
+== Инициализация ==
+loop для каждого источника Иi, i = 1..n
+  Sim -> Src: nextArrivalTime(t = 0)
+  Src --> Sim: t1 = a + (b − a)·R
+  Sim -> Sim: schedule(Event GENERATION(Иi, t1))
+end
+
+loop пока не выполнено условие остановки (пошагово: одно особое событие за шаг, ОД2)
+  Sim -> Sim: next(): ближайшее особое событие из календаря
+
+  alt Событие GENERATION (грузовик прибыл на склад)
+    == Генерация заявки (ИБ, ИЗ2) ==
+    Sim -> Src: generate(t)
+    note right of Src
+      **ИБ** — бесконечный источник: после каждой заявки
+      источник сразу планирует следующую.
+      **ИЗ2** — равномерный закон: интервал между
+      прибытиями τ = a + (b − a)·R, R ∈ [0; 1)
+    end note
+    Src -> Src: new Request(sourceId = i, number, tGen = t)
+    Src -> Src: tNext = t + a + (b − a)·R
+    Src --> Sim: заявка Зi.k, tNext
+    Sim -> Sim: schedule(Event GENERATION(Иi, tNext))
+    Sim -> Stat: recordGenerated(Зi.k)
+    Stat --> Sim: ok
+
+    Sim -> PD: place(Зi.k, t)
+    note right of PD
+      **Триггер** диспетчера постановки —
+      событие «заявка сгенерирована».
+      Вариант А: диспетчер сначала пробует
+      поставить заявку сразу на погрузчик.
+    end note
+
+    PD -> Pool: findFreeDevice()
+    note right of Pool
+      **Д2П2** — выбор прибора по кольцу:
+      поиск начинается с прибора под указателем,
+      j = ptr, ptr+1, …, (mod m), до первого свободного.
+      После постановки указатель ptr := (j + 1) mod m.
+      Если круг пройден и свободных нет — null,
+      указатель не меняется.
+    end note
+    loop j от указателя по кольцу, не более m шагов
+      Pool -> Dev: isFree()
+      Dev --> Pool: true / false
+    end
+
+    alt HappyFlow: свободный погрузчик Пj найден
+      Pool -> Pool: ptr := (j + 1) mod m
+      Pool --> PD: Пj
+      PD -> Dev: startService(Зi.k, t)
+      note right of Dev
+        **ПЗ1** — экспоненциальный закон
+        времени погрузки:
+        tОбсл = −(1/λ)·ln(R)
+      end note
+      Dev -> Dev: tОсв = t + tОбсл, состояние «занят»
+      Dev --> PD: tОсв
+      PD -> Sim: schedule(Event RELEASE(Пj, tОсв))
+      Sim --> PD: ok
+      PD -> Stat: recordWait(Зi.k, 0)
+      Stat --> PD: ok
+
+    else Все погрузчики заняты (приборы не отказывают — они заняты)
+      Pool --> PD: null
+      PD -> Buf: isFull()
+      Buf --> PD: true / false
+
+      alt Буфер не полон: постановка в буфер
+        PD -> Buf: add(Зi.k, t)
+        note right of Buf
+          **Д1ОЗ2** — постановка в порядке поступления:
+          заявка встаёт в конец очереди,
+          места занимаются начиная с первого.
+        end note
+        Buf -> Buf: requests.addLast(Зi.k)
+        Buf --> PD: занятое место p = size
+
+      else Буфер полон: выбивание (отказ)
+        PD -> Buf: removeLast()
+        note right of Buf
+          **Д1ОО4** — отказ получает последняя
+          поступившая в буфер заявка (хвост очереди,
+          меньше всех простояла). На её место встаёт
+          вновь пришедшая заявка.
+        end note
+        Buf -> Buf: requests.removeLast()
+        Buf --> PD: выбитая заявка Зx.y
+        PD -> Stat: recordRefused(Зx.y, t)
+        Stat --> PD: ok
+        PD -> Buf: add(Зi.k, t)
+        Buf -> Buf: requests.addLast(Зi.k)
+        Buf --> PD: место p = k (последнее)
+      end
+    end
+    PD --> Sim: заявка размещена
+
+  else Событие RELEASE (погрузчик Пj завершил погрузку)
+    == Освобождение погрузчика и выбор заявки из буфера (Д2Б1, Д2П2) ==
+    Sim -> Dev: finishService(t)
+    Dev -> Dev: состояние «свободен»
+    Dev --> Sim: обслуженная заявка Зi.k
+    Sim -> Stat: recordServed(Зi.k, t), recordBusyTime(Пj, tОбсл)
+    Stat --> Sim: ok
+
+    Sim -> SD: onDeviceFreed(t)
+    note right of SD
+      **Триггер** диспетчера выбора —
+      событие «погрузчик освободился».
+    end note
+    SD -> Buf: isEmpty()
+    Buf --> SD: true / false
+
+    alt В буфере есть заявки
+      SD -> Buf: takeFirst()
+      note right of Buf
+        **Д2Б1** — FIFO: выбирается заявка,
+        дольше всех простоявшая в очереди (голова).
+        **Д1ОЗ2** — оставшиеся заявки сдвигаются
+        на одно место к началу очереди.
+      end note
+      Buf -> Buf: requests.removeFirst(), сдвиг очереди
+      Buf --> SD: заявка Зa.b
+      SD -> Stat: recordWait(Зa.b, t − Зa.b.tBuffer)
+      Stat --> SD: ok
+
+      SD -> Pool: findFreeDevice()
+      note right of Pool
+        **Д2П2** — снова поиск по кольцу от указателя.
+        Свободен минимум один погрузчик (только что
+        освободившийся), поэтому прибор будет найден,
+        но это не обязательно Пj.
+      end note
+      loop j от указателя по кольцу до первого свободного
+        Pool -> Dev: isFree()
+        Dev --> Pool: true / false
+      end
+      Pool -> Pool: ptr := (j + 1) mod m
+      Pool --> SD: Пj'
+      SD -> Dev: startService(Зa.b, t)
+      Dev -> Dev: tОсв = t − (1/λ)·ln(R)  (ПЗ1)
+      Dev --> SD: tОсв
+      SD -> Sim: schedule(Event RELEASE(Пj', tОсв))
+      Sim --> SD: ok
+
+    else Буфер пуст
+      SD -> SD: погрузчик простаивает до следующего события
+    end
+    SD --> Sim: обработка освобождения завершена
+  end
+
+  opt Пошаговый режим (ОД2)
+    Sim -> Sim: показать формализованную схему: источники,\nбуфер, погрузчики, указатель, календарь, % отказа
+  end
+end
+
+== Завершение моделирования (ОР1) ==
+Sim -> Stat: buildSummaryTable()
+note right of Stat
+  **ОР1** — сводная таблица результатов:
+  по источникам — сгенерировано, отказов, P(отказа),
+  ср. время ожидания, обслуживания, пребывания;
+  по погрузчикам — коэффициент загрузки.
+end note
+Stat --> Sim: SummaryTable
+@enduml
