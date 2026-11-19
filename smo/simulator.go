@@ -45,6 +45,7 @@ type Simulator struct {
 	placementDispatcher *PlacementDispatcher
 	selectionDispatcher *SelectionDispatcher
 	statistics          *Statistics
+	maxRequests         int
 }
 
 func NewSimulator(cfg Config) *Simulator {
@@ -92,22 +93,48 @@ func (s *Simulator) Init() {
 	}
 }
 
+func (s *Simulator) limitReached() bool {
+	if s.maxRequests == 0 {
+		return false
+	}
+	total := 0
+	for _, src := range s.sources {
+		total += s.statistics.Generated(src.ID())
+	}
+	return total >= s.maxRequests
+}
+
 func (s *Simulator) Step() *Event {
-	e := s.calendar.Next()
-	if e == nil {
-		return nil
+	for {
+		e := s.calendar.Next()
+		if e == nil {
+			return nil
+		}
+
+		if e.Type() == GENERATION && s.limitReached() {
+			continue
+		}
+
+		s.currentTime = e.Time()
+
+		switch e.Type() {
+		case GENERATION:
+			s.handleGeneration(e)
+		case RELEASE:
+			s.handleRelease(e)
+		}
+		return e
 	}
+}
 
-	s.currentTime = e.Time()
-
-	switch e.Type() {
-	case GENERATION:
-		s.handleGeneration(e)
-	case RELEASE:
-		s.handleRelease(e)
+func (s *Simulator) RunAuto(requestCount int) {
+	if requestCount <= 0 {
+		panic("simulator: requets count must be positive")
 	}
-
-	return e
+	s.maxRequests = requestCount
+	s.Init()
+	for s.Step() != nil {
+	}
 }
 
 func (s *Simulator) GetState() SystemState {
