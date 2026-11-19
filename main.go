@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"text/tabwriter"
 
 	"github.com/MoneyprogerISG/smo-variant-20/smo"
 )
@@ -18,9 +19,11 @@ func main() {
 	b := flag.Float64("b", 5, "верхняя граница интервала между заявками")
 	lambda := flag.Float64("lambda", 0.5, "интенсивность обслуживания")
 	seed := flag.Int64("seed", 1, "начальное значение генератора случайных чисел")
+	mode := flag.String("mode", "step", "режим работы: step или auto")
+	requests := flag.Int("req", 0, "число заявок в режиме auto (0 — определить по формуле)")
 	flag.Parse()
 
-	runStep(smo.Config{
+	cfg := smo.Config{
 		Sources:        *n,
 		A:              *a,
 		B:              *b,
@@ -28,7 +31,57 @@ func main() {
 		Lambda:         *lambda,
 		BufferCapacity: *bufCap,
 		Seed:           *seed,
-	})
+	}
+
+	switch *mode {
+	case "step":
+		runStep(cfg)
+	case "auto":
+		runAuto(cfg, *requests)
+	default:
+		fmt.Fprintf(os.Stderr, "неизвестный режим: %s\n", *mode)
+		os.Exit(1)
+	}
+}
+
+func runAuto(cfg smo.Config, requests int) {
+	var table smo.SummaryTable
+
+	if requests > 0 {
+		table = smo.NewSimulator(cfg).RunAuto(requests)
+	} else {
+		history, t := smo.FindRequestCount(cfg)
+		table = t
+		fmt.Println("Определение числа заявок N:")
+		for i, it := range history {
+			fmt.Printf("  итерация %d: N=%d, P_отк=%.4f\n", i+1, it.N, it.P)
+		}
+		fmt.Println()
+	}
+
+	printSummary(table)
+}
+
+func printSummary(t smo.SummaryTable) {
+	fmt.Printf("Время моделирования: %.3f\n\n", t.TotalTime)
+
+	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(w, "Источник\tСгенерировано\tОтказов\tP_отк\tT_преб\tT_ож\tT_обсл\tD_ож\tD_обсл")
+	for _, r := range t.Sources {
+		fmt.Fprintf(w, "И%d\t%d\t%d\t%.4f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\n",
+			r.SourceID+1, r.Generated, r.Refused, r.RefusalProbability,
+			r.AvgSojourn, r.AvgWait, r.AvgService, r.WaitVariance, r.ServiceVariance)
+	}
+	w.Flush()
+
+	fmt.Printf("\nОбщая P_отк: %.4f\n\n", t.TotalRefusalProbability())
+
+	w = tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(w, "Прибор\tK_исп")
+	for _, d := range t.Devices {
+		fmt.Fprintf(w, "П%d\t%.4f\n", d.DeviceID+1, d.Utilization)
+	}
+	w.Flush()
 }
 
 func runStep(cfg smo.Config) {

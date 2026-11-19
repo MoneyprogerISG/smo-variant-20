@@ -1,6 +1,23 @@
 package smo
 
-import "math/rand"
+import (
+	"math"
+	"math/rand"
+)
+
+const (
+	tAlpha        = 1.643
+	delta         = 0.1
+	initialN      = 100
+	epsilon       = 0.1
+	maxN          = 1000000
+	maxIterations = 20
+)
+
+type Iteration struct {
+	N int
+	P float64
+}
 
 type Config struct {
 	Sources        int
@@ -136,6 +153,52 @@ func (s *Simulator) RunAuto(requestCount int) SummaryTable {
 	for s.Step() != nil {
 	}
 	return s.statistics.BuildSummaryTable(s.currentTime)
+}
+
+func requiredRequests(p float64) int {
+	n := int(math.Ceil(tAlpha * tAlpha * (1 - p) / (p * delta * delta)))
+	if n < initialN {
+		n = initialN
+	}
+	if n > maxN {
+		n = maxN
+	}
+	return n
+}
+
+func FindRequestCount(cfg Config) ([]Iteration, SummaryTable) {
+	var history []Iteration
+	var table SummaryTable
+	var prev float64
+	n := initialN
+
+	for i := 0; i < maxIterations; i++ {
+		if i > 0 && n == maxN && history[i-1].N == maxN {
+			break
+		}
+
+		run := cfg
+		run.Seed = cfg.Seed + int64(i)
+		table = NewSimulator(run).RunAuto(n)
+		p := table.TotalRefusalProbability()
+		history = append(history, Iteration{N: n, P: p})
+
+		if i > 0 && prev > 0 && math.Abs(p-prev)/prev < epsilon {
+			break
+		}
+		prev = p
+
+		if p == 0 {
+			n *= 2
+			if n > maxN {
+				n = maxN
+			}
+		} else {
+			n = requiredRequests(p)
+		}
+	}
+
+	return history, table
 }
 
 func (s *Simulator) GetState() SystemState {

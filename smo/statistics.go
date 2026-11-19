@@ -147,6 +147,18 @@ type SummaryTable struct {
 	Devices   []DeviceRow
 }
 
+func (t SummaryTable) TotalRefusalProbability() float64 {
+	generated, refused := 0, 0
+	for _, row := range t.Sources {
+		generated += row.Generated
+		refused += row.Refused
+	}
+	if generated == 0 {
+		return 0
+	}
+	return float64(refused) / float64(generated)
+}
+
 func (s *Statistics) BuildSummaryTable(totalTime float64) SummaryTable {
 	sources := make([]SourceRow, len(s.generated))
 	for i := range sources {
