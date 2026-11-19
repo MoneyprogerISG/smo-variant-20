@@ -127,7 +127,7 @@ func (s *Simulator) Step() *Event {
 	}
 }
 
-func (s *Simulator) RunAuto(requestCount int) {
+func (s *Simulator) RunAuto(requestCount int) SummaryTable {
 	if requestCount <= 0 {
 		panic("simulator: requets count must be positive")
 	}
@@ -135,6 +135,7 @@ func (s *Simulator) RunAuto(requestCount int) {
 	s.Init()
 	for s.Step() != nil {
 	}
+	return s.statistics.BuildSummaryTable(s.currentTime)
 }
 
 func (s *Simulator) GetState() SystemState {
